@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>three.js webgl - animation - morph targets</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<style>
+		body {
+			font-family: Monospace;
+			background-color: #f0f0f0;
+			margin: 0px;
+			overflow: hidden;
+		}
+
+		#info {
+			position: absolute;
+			top: 0px;
+			width: 100%;
+			padding: 5px;
+			font-family: Monospace;
+			font-size: 13px;
+			text-align: center;
+			color: #ffffff;
+		}
+
+		a {
+			color: #ffffff;
+		}
+	</style>
+</head>
+
+<body>
+	<div id="container">
+	</div>
+
+	<script src="https://rawgithub.com/mrdoob/three.js/master/build/three.js"></script>
+
+	<script src="https://rawgithub.com/mrdoob/three.js/master/examples/js/controls/OrbitControls.js"></script>
+	<script src="https://rawgithub.com/mrdoob/three.js/master/examples/js/WebGL.js"></script>
+	<script src="https://rawgithub.com/mrdoob/three.js/master/examples/js/libs/dat.gui.min.js"></script>
+	<script src="https://rawgithub.com/mrdoob/three.js/master/examples/js/libs/stats.min.js"></script>
+
+	<script>
+
+		if (WEBGL.isWebGLAvailable() === false) {
+
+			document.body.appendChild(WEBGL.getWebGLErrorMessage());
+
+		}
+
+		var container, stats;
+
+		var camera, scene, renderer;
+
+		var geometry, objects;
+
+		var mesh;
+
+		//Variaveis globais para ajudar a manipular valores
+		var heightSegments = -1;
+		var widthSegments = -1;
+		var topRadius = 0;
+		var bottomRadius = -1;
+		var lastGeometry = [];
+		var lastGeometry2 = [];
+		var rotation = 0;
+
+		init();
+		animate();
+
+
+
+		function init() {
+
+			container = document.getElementById('container');
+
+			camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+			camera.position.z = 500;
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color(0x222222);
+			scene.fog = new THREE.Fog(0x000000, 1, 15000);
+
+			var light = new THREE.PointLight(0xff2200);
+			camera.add(light);
+			scene.add(camera);
+
+			var light = new THREE.AmbientLight(0x111111);
+			scene.add(light);
+
+			//Criaçao da geometria base
+			var geometry = new THREE.CylinderBufferGeometry(50, 50, 70, 32);
+			var material = new THREE.MeshLambertMaterial({ color: 0xffffff, morphTargets: true });
+
+			mesh = new THREE.Mesh(geometry, material);
+			scene.add(mesh);
+
+			var gui = new dat.GUI();
+
+			//esta parte da UI diz respeito a forma que o novo objeto ira tomar, se o utilizador assim o quiser e clique em alguma das opcoes apresentadas
+			//por exemplo, se mudar para "pyramid" o objeto em questão irá mudar a sua forma para a de uma piramide
+			var obj = {
+				pyramid: function () { pyramid(); },
+				cone: function () { cone(); },
+				cube: function () { cube(); },
+				cylinder: function () { cylinder(); },
+				historic: function () { historic(); },
+				reset: function () { cylinder(); cleanLastGeometry(1); }
+			};
+			var folder1 = gui.addFolder('Shapes');
+			folder1.add(obj, 'pyramid');
+			folder1.add(obj, 'cone');
+			folder1.add(obj, 'cube');
+			folder1.add(obj, 'cylinder');
+			folder1.add(obj, 'historic');
+			folder1.add(obj, 'reset');
+			folder1.open();
+
+			// esta parte da UI diz respeito ao "tamanho" do objeto, que pode ser "expandido" ou "reduzido" caso o user queira
+			// o utilizador tem a opção de mudar mudar o tamanho do objeto pelos Eixos, bem com iniciar ou terminar a rotaçao do objeto
+			// alterando a barra ira alterar os valores do objecto no eixo em questão
+			var params = {
+				changeX: 0,
+				changeY: 0,
+				changeZ: 0,
+				startRotation: function () { rotation = 0.01; },
+				stopRotation: function () { rotation = 0; },
+			};
+			var folder2 = gui.addFolder('Size / Rotation');
+			folder2.add(params, 'changeX', -0.99, 1).step(0.01).onChange(function (value) { widthX(value); });
+			folder2.add(params, 'changeY', -0.99, 1).step(0.01).onChange(function (value) { heightY(value); });
+			folder2.add(params, 'changeZ', -0.99, 1).step(0.01).onChange(function (value) { widthZ(value); })
+			folder2.add(params, 'startRotation');
+			folder2.add(params, 'stopRotation');
+			folder2.open();
+
+			//esta parte da UI permite controlar a cor do objeto apresentado
+			var color = {
+				Blue: function () { changeColor("Blue"); },
+				Red: function () { changeColor("Red"); },
+				Green: function () { changeColor("Green"); },
+				Yellow: function () { changeColor("Yellow"); },
+				Pink: function () { changeColor("Pink"); },
+				Orange: function () { changeColor("Orange"); },
+				Purple: function () { changeColor("Purple"); },
+				Black: function () { changeColor("Black"); },
+				White: function () { changeColor("White"); }
+			};
+			var folder3 = gui.addFolder('Color');
+			folder3.add(color, "Blue");
+			folder3.add(color, "Red");
+			folder3.add(color, "Green");
+			folder3.add(color, "Yellow");
+			folder3.add(color, "Pink");
+			folder3.add(color, "Orange");
+			folder3.add(color, "Purple");
+			folder3.add(color, "Black");
+			folder3.add(color, "White");
+			folder3.open();
+
+			//Esta parte da UI controla um novo conjunto de geometrias independentes às anteriores
+			var otherShapes = {
+				Sphere: function () { sphere(); },
+				SphereCone: function () { sphereCone(); },
+				Prism: function () { prism(); },
+				historic: function () { historic2(); },
+				reset: function () { sphere(); cleanLastGeometry2(2) }
+			};
+			var folder4 = gui.addFolder('More Shapes');
+			folder4.add(otherShapes, "Sphere");
+			folder4.add(otherShapes, "SphereCone");
+			folder4.add(otherShapes, "Prism");
+			folder4.add(otherShapes, 'historic');
+			folder4.add(otherShapes, 'reset');
+			folder4.open();
+
+			renderer = new THREE.WebGLRenderer();
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			container.appendChild(renderer.domElement);
+
+			var controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+			window.addEventListener('resize', onWindowResize, false);
+
+		}
+
+		//esta parte serva para os objetos apresenados nao estarem distorcidos ao olho do utilizador
+		function onWindowResize() {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		}
+
+		function animate() {
+			requestAnimationFrame(animate);
+			render();
+		}
+
+		function render() {
+			mesh.rotation.x += rotation;
+			mesh.rotation.y += rotation;
+			renderer.render(scene, camera);
+		}
+
+		//Função para criar uma esfera
+		function sphere() {
+			//Este for serve para ir calculando os valores que certos parametros vao ter
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					//Este timeout serve para a animaçao ficar mais suave diminuindo a velocidade do loop
+					setTimeout(function () {
+						mesh.geometry.dynamic = true;
+
+						if (lastGeometry2[lastGeometry2.length - 2] == "sphereCone") {		//Caso a ultima geometria seja uma sphereCone
+							//Os ifs servem para a animação ser suave, para nao haver saltos nas formas da geometria
+							if (8 * (value * 4) < 8) {
+								widthSegments = 8;
+							}
+							else {
+								widthSegments = 8 * (value * 4);
+							}
+
+							if (1 * (value * 32) < 1) {
+								heightSegments = 1;
+							}
+							else {
+								heightSegments = 1 * (value * 32);
+							}
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else if (lastGeometry2[lastGeometry2.length - 2] == "prism") {		//Caso a ultima geometria seja um prisma
+							//Os ifs servem para a animação ser suave, para nao haver saltos nas formas da geometria
+							if (2 * (value * 16) < 2) {
+								widthSegments = 2;
+							}
+							else {
+								widthSegments = 2 * (value * 16);
+							}
+
+							if (1 * (value * 32) < 1) {
+								heightSegments = 1;
+							}
+							else {
+								heightSegments = 1 * (value * 32);
+							}
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else {
+							mesh.geometry = new THREE.SphereGeometry(50, 32, 32);
+							return;
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry2.push("sphere");
+		}
+
+//Função para criar uma esfera~cone
+		function sphereCone() {
+			//Este for serve para ir calculando os valores que certos parametros vao ter
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					//Este timeout serve para a animaçao ficar mais suave diminuindo a velocidade do loop
+					setTimeout(function () {
+						mesh.geometry.dynamic = true;
+						if (lastGeometry2[lastGeometry2.length - 2] == "sphereCone") {		//Caso a ultima geometria seja igual
+							return;
+						}
+						else if (lastGeometry2[lastGeometry2.length - 2] == "sphere") {		//Caso a ultima geometria seja uma esfera
+							widthSegments = 32 / (value * 4);
+							heightSegments = 32 / (value * 32);
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else if (lastGeometry2[lastGeometry2.length - 2] == "prism") {		//Caso a ultima geometria seja um prisma
+							//Os ifs servem para a animação ser suave, para nao haver saltos nas formas da geometria
+							if (2 * (value * 4) < 2) {
+								widthSegments = 2;
+							}
+							else if (2 * (value * 4) > 7.9) {
+								widthSegments = 8;
+							}
+							else {
+								widthSegments = 2 * (value * 4);
+							}
+							heightSegments = 1;
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else {		//Caso nao haja conhecimento da ultima geometria, este passa de esfera para esfera~cone
+							widthSegments = 32 / (value * 4);
+							heightSegments = 32 / (value * 32);
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry2.push("sphereCone");
+		}
+
+		function prism() {
+			console.log(lastGeometry);
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					setTimeout(function () {
+						mesh.geometry.dynamic = true;
+						if (lastGeometry2[lastGeometry2.length - 2] == "prism") {
+							return;
+						}
+						else if (lastGeometry2[lastGeometry2.length - 2] == "sphere") {
+							widthSegments = 32 / (value * 16);
+							heightSegments = 32 / (value * 32);
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else if (lastGeometry2[lastGeometry2.length - 2] == "sphereCone") {
+							if (8 / (value * 4) > 8) {
+								widthSegments = 8;
+							}
+							else {
+								widthSegments = 8 / (value * 4);
+							}
+							heightSegments = 1;
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						else {
+							widthSegments = 32 / (value * 16);
+							heightSegments = 32 / (value * 32);
+							mesh.geometry = new THREE.SphereGeometry(50, widthSegments, heightSegments);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry2.push("prism");
+		}
+
+		function changeColor(value) {
+			switch (value) {
+				case "Blue":
+					camera.children[0].color.setHex(0x4286f4);
+					break;
+				case "Red":
+					camera.children[0].color.setHex(0xff2200);
+					break;
+				case "Green":
+					camera.children[0].color.setHex(0x11f42b);
+					break;
+				case "Yellow":
+					camera.children[0].color.setHex(0xf4e811);
+					break;
+				case "Pink":
+					camera.children[0].color.setHex(0xff44d6);
+					break;
+				case "Orange":
+					camera.children[0].color.setHex(0xff830f);
+					break;
+				case "Purple":
+					camera.children[0].color.setHex(0xa20fff);
+					break;
+				case "Black":
+					camera.children[0].color.setHex(0x050505);
+					break;
+				case "White":
+					camera.children[0].color.setHex(0xf2eaf2);
+					break;
+				default:
+			}
+		}
+
+		function pyramid() {
+			console.log(lastGeometry);
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					setTimeout(function () {
+						topRadius = 50 * (1 - value);
+						mesh.geometry.dynamic = true;
+						if (lastGeometry[lastGeometry.length - 2] == "pyramid") {
+							return;
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "cone") {
+							heightSegments = 32 / (value * 8);
+							mesh.geometry = new THREE.CylinderBufferGeometry(0, 50, 70, heightSegments);
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "cube") {
+							heightSegments = 4;
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+						}
+						else {
+							heightSegments = 32 / (value * 8);
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry.push("pyramid");
+		}
+
+		function cone() {
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					setTimeout(function () {
+						topRadius = 50 * (1 - value);
+						mesh.geometry.dynamic = true;
+						if (lastGeometry[lastGeometry.length - 2] == "cone") {
+							return;
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "pyramid") {
+							if (4 * (value * 8) < 4) {
+								heightSegments = 4;
+								topRadius = 0;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+							else {
+								heightSegments = 4 * (value * 8);
+								topRadius = 0;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "cube") {
+							if (4 * (value * 8) < 4) {
+								heightSegments = 4;
+								topRadius = 50;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+							else {
+								heightSegments = 4 * (value * 8);
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+						}
+						else {
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, 32);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry.push("cone");
+		}
+
+		function cube() {
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					setTimeout(function () {
+						topRadius = 50 * value;
+						mesh.geometry.dynamic = true;
+
+						if (lastGeometry[lastGeometry.length - 2] == "cube") {
+							return;
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "cone") {
+							heightSegments = 32 / (value * 8);
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "pyramid") {
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, 4);
+						}
+						else {
+							heightSegments = 32 / (value * 8);
+							mesh.geometry = new THREE.CylinderBufferGeometry(50, 50, 70, heightSegments);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry.push("cube");
+		}
+
+		function cylinder() {
+			for (value = 0.01; value <= 1; value += 0.01) {
+				(function (value) {
+					setTimeout(function () {
+						topRadius = 50 * value;
+						mesh.geometry.dynamic = true;
+
+						if (lastGeometry[lastGeometry.length - 2] == "cone") {
+							heightSegments = 32;
+							mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "pyramid") {
+							if (4 * (value * 8) < 4) {
+								heightSegments = 4;
+								topRadius = 0;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+							else {
+								heightSegments = 4 * (value * 8);
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+						}
+						else if (lastGeometry[lastGeometry.length - 2] == "cube") {
+							if (4 * (value * 8) < 4) {
+								heightSegments = 4;
+								topRadius = 50;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+							else {
+								heightSegments = 4 * (value * 8);
+								topRadius = 50;
+								mesh.geometry = new THREE.CylinderBufferGeometry(topRadius, 50, 70, heightSegments);
+							}
+						}
+						else {
+							mesh.geometry = new THREE.CylinderBufferGeometry(50, 50, 70, 32);
+						}
+						mesh.geometry.verticesNeedUpdate = true;
+					}, 1000 * value)
+				})(value);
+			}
+			lastGeometry.push("cylinder");
+		}
+
+		function historic() {
+			var historic = lastGeometry;
+			for (i = 0; i < historic.length; i++) {
+				(function (i) {
+					setTimeout(function () {
+						switch (historic[i]) {
+							case "pyramid":
+								pyramid();
+								break;
+							case "cone":
+								cone();
+								break;
+							case "cube":
+								cube();
+								break;
+							default:
+								cylinder();
+						}
+					}, 1000 * i)
+				})(i);
+			}
+			cleanLastGeometry(historic.length);
+		}
+
+		function cleanLastGeometry(l) {
+			(function (l) {
+				setTimeout(function () {
+					lastGeometry = [];
+				}, 1000 * l)
+			})(l);
+		}
+
+		function historic2() {
+			var historic2 = lastGeometry2;
+			for (i = 0; i < historic2.length; i++) {
+				(function (i) {
+					setTimeout(function () {
+						switch (historic2[i]) {
+							case "sphere":
+								sphere();
+								break;
+							case "sphereCone":
+								sphereCone();
+								break;
+							case "prism":
+								prism();
+								break;
+							default:
+								sphere();
+						}
+					}, 1000 * i)
+				})(i);
+			}
+			cleanLastGeometry2(historic2.length);
+		}
+
+		function cleanLastGeometry2(l) {
+			(function (l) {
+				setTimeout(function () {
+					lastGeometry2 = [];
+				}, 1000 * l)
+			})(l);
+		}
+
+		function widthX(value) {
+			mesh.scale.x = 1 + value;
+		}
+
+		function widthZ(value) {
+			mesh.scale.z = 1 + value;
+		}
+
+		function heightY(value) {
+			mesh.scale.y = 1 + value;
+		}
+
+	</script>
+
+</body>
+
+</html>
